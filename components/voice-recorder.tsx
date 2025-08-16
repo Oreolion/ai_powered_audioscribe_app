@@ -2,16 +2,51 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Trash2, Volume2 } from 'lucide-react';
 
-// Extend the Window interface for SpeechRecognition types
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
+// Define SpeechRecognition interfaces
+interface SpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null;
+  onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any) | null;
+  onend: ((this: SpeechRecognition, ev: Event) => any) | null;
 }
 
-// Fallback SpeechRecognition type for browsers
-type SpeechRecognition = any;
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  [index: number]: SpeechRecognitionAlternative;
+  length: number;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: 'no-speech' | 'aborted' | 'audio-capture' | 'network' | 'not-allowed' | 'service-not-allowed' | 'bad-grammar' | 'language-not-supported';
+  message: string;
+}
+
+// Extend the Window interface for SpeechRecognition constructors
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognition;
+    webkitSpeechRecognition?: new () => SpeechRecognition;
+  }
+}
 
 const VoiceRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
@@ -20,33 +55,30 @@ const VoiceRecorder = () => {
   const [error, setError] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSupported, setIsSupported] = useState(true);
-
-  const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const recognitionRef = useRef<any>(null);
-  const animationFrameRef = useRef(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Check for browser support
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
       setIsSupported(false);
       setError('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
       return;
     }
 
     // Initialize speech recognition
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognitionRef.current = new SpeechRecognition();
-    
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognitionRef.current = new SR();
+
     recognitionRef.current.continuous = true;
     recognitionRef.current.interimResults = true;
     recognitionRef.current.lang = 'en-US';
 
-    recognitionRef.current.onresult = (event) => {
+    recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
       let finalTranscript = '';
       let interimTranscript = '';
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
@@ -55,7 +87,6 @@ const VoiceRecorder = () => {
           interimTranscript += transcript;
         }
       }
-
       setTranscript(prev => {
         const lines = prev.split('\n');
         if (lines[lines.length - 1].includes('...')) {
@@ -67,7 +98,7 @@ const VoiceRecorder = () => {
       });
     };
 
-    recognitionRef.current.onerror = (event) => {
+    recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
       setError(`Recognition error: ${event.error}`);
       setIsRecording(false);
@@ -92,16 +123,16 @@ const VoiceRecorder = () => {
     };
   }, []);
 
-  const setupAudioVisualization = async (stream) => {
-    audioContextRef.current = new (window.AudioContext)();
+  const setupAudioVisualization = async (stream: MediaStream) => {
+    audioContextRef.current = new AudioContext();
     analyserRef.current = audioContextRef.current.createAnalyser();
     const microphone = audioContextRef.current.createMediaStreamSource(stream);
-    
+
     analyserRef.current.fftSize = 256;
     microphone.connect(analyserRef.current);
-    
+
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    
+
     const updateAudioLevel = () => {
       if (analyserRef.current) {
         analyserRef.current.getByteFrequencyData(dataArray);
@@ -110,31 +141,30 @@ const VoiceRecorder = () => {
         animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
       }
     };
-    
+
     updateAudioLevel();
   };
 
   const startRecording = async () => {
     if (!isSupported) return;
-    
+
     setError('');
     setIsProcessing(true);
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           sampleRate: 44100
-        } 
+        }
       });
-      
+
       await setupAudioVisualization(stream);
-      
-      recognitionRef.current.start();
+
+      recognitionRef.current?.start();
       setIsRecording(true);
       setIsProcessing(false);
-      
+
     } catch (err) {
       console.error('Error accessing microphone:', err);
       setError('Could not access microphone. Please check permissions.');
@@ -146,15 +176,15 @@ const VoiceRecorder = () => {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
-    
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-    
+
     if (audioContextRef.current) {
       audioContextRef.current.close();
     }
-    
+
     setIsRecording(false);
     setAudioLevel(0);
   };
@@ -192,7 +222,6 @@ const VoiceRecorder = () => {
         />
       );
     });
-
     return (
       <div className="flex items-end justify-center gap-1 h-12 bg-gray-50 rounded-lg p-2 mb-6">
         {bars}
@@ -207,13 +236,11 @@ const VoiceRecorder = () => {
           <Mic className="w-5 h-5 text-blue-600" />
           <h3 className="text-lg font-semibold text-gray-900">Live Voice Recording</h3>
         </div>
-
         {error && (
           <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-lg text-center">
             {error}
           </div>
         )}
-
         <div className="flex flex-wrap gap-3 justify-center mb-6">
           <button
             onClick={startRecording}
@@ -227,7 +254,6 @@ const VoiceRecorder = () => {
             <Mic className="w-4 h-4" />
             {isRecording ? 'Recording...' : 'Start Recording'}
           </button>
-
           <button
             onClick={stopRecording}
             disabled={!isRecording}
@@ -236,7 +262,6 @@ const VoiceRecorder = () => {
             <Square className="w-4 h-4" />
             Stop
           </button>
-
           <button
             onClick={clearTranscript}
             className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium shadow-lg shadow-red-200 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200"
@@ -245,13 +270,10 @@ const VoiceRecorder = () => {
             Clear
           </button>
         </div>
-
         <div className={`text-center py-3 px-4 rounded-lg font-medium mb-6 ${getStatusColor()}`}>
           {getStatusText()}
         </div>
-
         <AudioVisualizer />
-
         <div className="relative">
           <textarea
             value={transcript}
@@ -259,7 +281,6 @@ const VoiceRecorder = () => {
             placeholder="Your transcribed speech will appear here... You can also edit the text directly."
             className="w-full h-48 p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 leading-relaxed"
           />
-          
           <div className="flex justify-between items-center mt-2 text-sm text-gray-500">
             <span className="flex items-center gap-1">
               <Volume2 className="w-4 h-4" />
@@ -268,7 +289,6 @@ const VoiceRecorder = () => {
             <span>{transcript.length} characters</span>
           </div>
         </div>
-
         {transcript && (
           <div className="mt-6 p-4 bg-green-50 rounded-lg">
             <p className="text-green-800 text-sm">

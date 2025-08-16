@@ -12,6 +12,7 @@
     "@heroicons/react": "^2.2.0",
     "@prisma/client": "^6.0.0",
     "@radix-ui/react-slot": "^1.2.3",
+    "@speechly/speech-recognition-polyfill": "github:speechly/speech-recognition-polyfill",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
