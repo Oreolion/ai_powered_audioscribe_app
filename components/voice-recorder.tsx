@@ -70,7 +70,13 @@ const VoiceRecorder = () => {
 
     // Initialize speech recognition
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognitionRef.current = new SR();
+    if (SR) {
+      recognitionRef.current = new SR();
+    } else {
+      setIsSupported(false);
+      setError('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
 
     recognitionRef.current.continuous = true;
     recognitionRef.current.interimResults = true;
